@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target
+/data
 
 # Cargo lock file for libraries (optional, für Binary-Programme aber meist committen!)
 # Cargo.lock

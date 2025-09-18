@@ -66,7 +66,21 @@ fn scan_dir(dirpath: &str, hashset: &HashSet<String>) -> bool {
 }
 
 fn main() {
-    let hashset = load_md5_hashset(&"full_md5.txt");
+    let exe_path = std::env::current_exe().expect("Could not get current exe path");
+    let exe_dir = exe_path.parent().expect("Could not get parent directory");
+    let data_dir = exe_dir.join("data");
+    let data_file = data_dir.join("full_md5.txt");
+
+    if !data_dir.exists() {
+        std::fs::create_dir_all(&data_dir).expect("Could not create data directory");
+        if !data_file.exists() {
+            println!("Data file 'full_md5.txt' not found in 'data' directory.");
+            println!("Please download the necessary data files into the 'data' directory.");
+            std::process::exit(1);
+        }
+    }
+
+    let hashset = load_md5_hashset(&data_file.to_str().unwrap());
 
     let args: Vec<String> = std::env::args().collect();
     let filepath = if args.len() > 1 {
