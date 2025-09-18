@@ -6,12 +6,8 @@ use std::io::Read;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-// Struct to hold the result of a scan
-struct ScanResult {
-    malicious_found: bool,
-    malicious_files: i64,
-    total_files: i64,
-}
+mod scan_result;
+use scan_result::ScanResult;
 
 // Load configuration from an INI file
 fn load_config(filename: &str) -> Ini {
@@ -52,20 +48,14 @@ fn scan_file(filepath: &str, hashset: &HashSet<String>) -> ScanResult {
     match md5_hash_of_file(filepath) {
         Ok(filehash) => {
             if hashset.contains(&filehash) {
-                println!(
-                    "File {} - {} is malicious (in hashset)!",
-                    filepath, filehash
-                );
                 ScanResult {
-                    malicious_found: true,
-                    malicious_files: 1,
                     total_files: 1,
+                    malicious_files_list: vec![filepath.to_string()]
                 }
             } else {
                 ScanResult {
-                    malicious_found: false,
-                    malicious_files: 0,
                     total_files: 1,
+                    malicious_files_list: vec![]
                 }
             }
         }
@@ -77,34 +67,26 @@ fn scan_file(filepath: &str, hashset: &HashSet<String>) -> ScanResult {
 
 // Recursively scan a directory for files and check each file's MD5 hash
 fn scan_dir(dirpath: &str, hashset: &HashSet<String>) -> ScanResult {
-    let mut malicious_found = false;
     let mut total_files = 0;
-    let mut malicious_files = 0;
+    let mut malicious_files_list = Vec::new();
     let paths = std::fs::read_dir(dirpath).expect("Could not read directory");
     for path in paths {
         let path = path.expect("Could not get path").path();
         if path.is_file() {
             let filepath = path.to_str().unwrap();
             let result = scan_file(filepath, hashset);
-            if result.malicious_found {
-                malicious_found = true;
-            }
             total_files += result.total_files;
-            malicious_files += result.malicious_files;
+            malicious_files_list.extend(result.malicious_files_list);
         } else if path.is_dir() {
             let dirpath = path.to_str().unwrap();
             let result = scan_dir(dirpath, hashset);
-            if result.malicious_found {
-                malicious_found = true;
-            }
             total_files += result.total_files;
-            malicious_files += result.malicious_files;
+            malicious_files_list.extend(result.malicious_files_list);
         }
     }
     ScanResult {
-        malicious_found,
-        malicious_files,
         total_files,
+        malicious_files_list,
     }
 }
 
@@ -146,11 +128,14 @@ fn main() {
     let scan_duration = scan_start.elapsed();
     println!(
         "Scan completed in {:.2?} - scanned {} files {} malicious",
-        scan_duration, result.total_files, result.malicious_files
+        scan_duration, result.total_files, result.malicious_files()
     );
 
-    if result.malicious_found {
+    if result.malicious_found() {
         println!("Malicious files detected.");
+        for file in result.malicious_files_list {
+            println!(" - {}", file);
+        }
         std::process::exit(1);
     } else {
         println!("No malicious files detected.");
