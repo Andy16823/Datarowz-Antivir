@@ -9,6 +9,8 @@ use std::path::Path;
 mod scan_result;
 use scan_result::ScanResult;
 
+mod target_windows;
+
 // Supported hash algorithms
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum HashAlgorithm {
@@ -22,7 +24,8 @@ fn create_config(filename: &str) -> Ini {
     let mut conf = Ini::new();
     conf.with_section(Some("settings"))
         .set("hash_algorithm", "sha256")
-        .set("hash_file", "{executable_path}/data/full_sha256.txt");
+        .set("hash_file", "{executable_path}/data/full_sha256.txt")
+        .set("context_menu", "true");
     conf.write_to_file(filename).unwrap();
     return conf;
 }
@@ -103,7 +106,7 @@ fn hash_of_file(filename: &str, algorithm: HashAlgorithm) -> Result<String, std:
 fn scan_file(filepath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm) -> ScanResult {
     match hash_of_file(filepath, algorithm) {
         Ok(filehash) => {
-            // println!("File: {} Hash: {}", filepath, filehash);
+            println!("File: {} Hash: {}", filepath, filehash);
             if hashset.contains(&filehash) {
                 ScanResult {
                     total_files: 1,
@@ -147,20 +150,10 @@ fn scan_dir(dirpath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm) 
     }
 }
 
-fn main() {
-    let exe_path = std::env::current_exe().expect("Could not get current exe path");
-    let exe_dir = exe_path.parent().expect("Could not get parent directory");
-    let conf = load_config(exe_dir.join("cofig.ini").to_str().unwrap());
-    let conf = match conf {
-        Some(c) => c,
-        None => {
-            println!("Configuration file not found. Creating default config.ini");
-            create_config(exe_dir.join("cofig.ini").to_str().unwrap())
-        }
-    };
+fn action_scan(args: Vec<String>, conf: &Ini, exe_dir: &str) {
     let algorithm = load_algorithm(&conf);
     println!("Using hash algorithm: {:?}", algorithm);
-    let hash_file = load_hash_file(&conf, exe_dir.to_str().unwrap());
+    let hash_file = load_hash_file(&conf, exe_dir);
     let data_file = Path::new(&hash_file);
 
     if data_file.exists() == false {
@@ -177,9 +170,8 @@ fn main() {
         data_file.to_str().unwrap()
     );
 
-    let args: Vec<String> = std::env::args().collect();
-    let filepath = if args.len() > 1 {
-        args[1].clone()
+    let filepath = if args.len() > 2 {
+        args[2].clone()
     } else {
         panic!("Please provide a file path as an argument.");
     };
@@ -204,9 +196,81 @@ fn main() {
         for file in result.malicious_files_list {
             println!(" - {}", file);
         }
-        std::process::exit(1);
     } else {
         println!("No malicious files detected.");
-        std::process::exit(0);
     }
+}
+
+fn action_create_menu(debug_mode: bool) {
+    #[cfg(target_os = "windows")]
+    {
+        use crate::target_windows::register_context_menu;
+
+        if let Err(e) = register_context_menu(debug_mode) {
+            println!("Could not register context menu: {}", e);
+        }
+    }
+}
+
+fn action_unregister_menu() {
+    #[cfg(target_os = "windows")]
+    {
+        use crate::target_windows::unregister_context_menu;
+
+        if let Err(e) = unregister_context_menu() {
+            println!("Could not unregister context menu: {}", e);
+        }
+    }
+}
+
+fn main() {
+    // Get the path of the executable and its directory
+    let exe_path = std::env::current_exe().expect("Could not get current exe path");
+    let exe_dir = exe_path.parent().expect("Could not get parent directory");
+
+    // Parse the command line arguments
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        println!("Usage: {} <action>", args[0]);
+        return;
+    }
+    let action = &args[1];
+
+    // Load or create configuration
+    let conf = load_config(exe_dir.join("cofig.ini").to_str().unwrap());
+    let conf = match conf {
+        Some(c) => c,
+        None => {
+            println!("Configuration file not found. Creating default config.ini");
+            create_config(exe_dir.join("cofig.ini").to_str().unwrap())
+        }
+    };
+
+    // Update context menus if its enabled
+    if conf
+        .section(Some("settings"))
+        .and_then(|s| s.get("context_menu"))
+        .unwrap_or("false")
+        .to_lowercase()
+        == "true"
+    {
+        action_create_menu(false);
+    }
+
+    // Perform the requested action
+    match action.as_str() {
+        "scan" => action_scan(args, &conf, exe_dir.to_str().unwrap()),
+        "register_context_menu" => action_create_menu(true),
+        "unregister_context_menu" => action_unregister_menu(),
+        _ => {
+            println!("Unknown action: {}", action);
+            println!("Available actions: scan, register_context_menu, unregister_context_menu");
+        }
+    }
+
+    // Wait for user input
+    println!("Press Enter to exit...");
+    let mut exit_input = String::new();
+    std::io::stdin().read_line(&mut exit_input).unwrap();
+    std::process::exit(0);
 }
