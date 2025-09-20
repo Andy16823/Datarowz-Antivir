@@ -9,6 +9,7 @@ use std::path::Path;
 mod scan_result;
 use scan_result::ScanResult;
 
+// Supported hash algorithms
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum HashAlgorithm {
     MD5,
@@ -16,10 +17,22 @@ enum HashAlgorithm {
     SHA256,
 }
 
-// Load configuration from an INI file
-fn load_config(filename: &str) -> Ini {
-    let conf = Ini::load_from_file(filename).unwrap();
+// Create a default configuration file
+fn create_config(filename: &str) -> Ini {
+    let mut conf = Ini::new();
+    conf.with_section(Some("settings"))
+        .set("hash_algorithm", "sha256")
+        .set("hash_file", "{executable_path}/data/full_sha256.txt");
+    conf.write_to_file(filename).unwrap();
     return conf;
+}
+
+// Load configuration from an INI file
+fn load_config(filename: &str) -> Option<Ini> {
+    match Ini::load_from_file(filename) {
+        Ok(conf) => Some(conf),
+        Err(_) => None,
+    }
 }
 
 // Get the hash algorithm from the configuration
@@ -138,6 +151,13 @@ fn main() {
     let exe_path = std::env::current_exe().expect("Could not get current exe path");
     let exe_dir = exe_path.parent().expect("Could not get parent directory");
     let conf = load_config(exe_dir.join("cofig.ini").to_str().unwrap());
+    let conf = match conf {
+        Some(c) => c,
+        None => {
+            println!("Configuration file not found. Creating default config.ini");
+            create_config(exe_dir.join("cofig.ini").to_str().unwrap())
+        }
+    };
     let algorithm = load_algorithm(&conf);
     println!("Using hash algorithm: {:?}", algorithm);
     let hash_file = load_hash_file(&conf, exe_dir.to_str().unwrap());
