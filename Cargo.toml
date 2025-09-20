@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 md5 = "0.8.0"
 rust-ini = "0.21.3"
+sha1 = "0.10.6"
+sha2 = "0.10.9"
