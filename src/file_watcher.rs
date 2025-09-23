@@ -38,6 +38,16 @@ pub fn watch_dirs(paths: Vec<String>, hashset: &HashSet<String>, algorithm: Hash
                 }
                 // Here you can implement logic to handle the change,
                 // e.g., re-scan the directory or specific files.
+                for (file_path, watcher_file) in changed_files.iter_mut() {
+                    let result = scan_file(&watcher_file.path, hashset, algorithm);
+                    watcher_file.scan_result = Some(result);
+                    if let Some(scan_result) = &watcher_file.scan_result {
+                        if scan_result.malicious_found() {
+                            println!("Malicious file detected: {:?}", scan_result.malicious_files_list);
+                        }
+                    }
+                }
+                changed_files.clear();
             }
             Err(e) => println!("Watch error: {:?}", e),
         }
