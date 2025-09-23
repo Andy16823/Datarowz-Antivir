@@ -9,6 +9,7 @@ use std::path::Path;
 mod scan_result;
 use scan_result::ScanResult;
 
+mod file_watcher;
 mod target_windows;
 
 // Supported hash algorithms
@@ -262,6 +263,17 @@ fn main() {
         "scan" => action_scan(args, &conf, exe_dir.to_str().unwrap()),
         "register_context_menu" => action_create_menu(true),
         "unregister_context_menu" => action_unregister_menu(),
+        "watch" => {
+            let algorithm = load_algorithm(&conf);
+            println!("Using hash algorithm: {:?}", algorithm);
+            let hash_file = load_hash_file(&conf, exe_dir.to_str().unwrap());
+            let data_file = Path::new(&hash_file);
+            let hashset = create_hashset(&data_file.to_str().unwrap());
+
+            let mut paths = Vec::new();
+            paths.push("C:/Users/andy1/Documents".to_string());
+            file_watcher::watch_dirs(paths, &hashset, algorithm);
+        }
         _ => {
             println!("Unknown action: {}", action);
             println!("Available actions: scan, register_context_menu, unregister_context_menu");
