@@ -10,6 +10,7 @@ mod scan_result;
 use scan_result::ScanResult;
 
 mod file_watcher;
+mod io_utils;
 mod target_windows;
 
 // Supported hash algorithms
@@ -224,6 +225,20 @@ fn action_unregister_menu() {
     }
 }
 
+fn action_watch(conf: &Ini, exe_dir: &std::path::Path) {
+    let algorithm = load_algorithm(&conf);
+    println!("Using hash algorithm: {:?}", algorithm);
+    let hash_file = load_hash_file(&conf, exe_dir.to_str().unwrap());
+    let data_file = Path::new(&hash_file);
+    let hashset = create_hashset(&data_file.to_str().unwrap());
+
+    let watcher_dirs = conf.section("file_watcher").and_then(|s| s.get("watch_dirs"));
+
+    let mut paths = Vec::new();
+    paths.push("C:/Users/andy1/Documents".to_string());
+    file_watcher::watch_dirs(paths, &hashset, algorithm);
+}
+
 fn main() {
     // Get the path of the executable and its directory
     let exe_path = std::env::current_exe().expect("Could not get current exe path");
@@ -264,15 +279,7 @@ fn main() {
         "register_context_menu" => action_create_menu(true),
         "unregister_context_menu" => action_unregister_menu(),
         "watch" => {
-            let algorithm = load_algorithm(&conf);
-            println!("Using hash algorithm: {:?}", algorithm);
-            let hash_file = load_hash_file(&conf, exe_dir.to_str().unwrap());
-            let data_file = Path::new(&hash_file);
-            let hashset = create_hashset(&data_file.to_str().unwrap());
-
-            let mut paths = Vec::new();
-            paths.push("C:/Users/andy1/Documents".to_string());
-            file_watcher::watch_dirs(paths, &hashset, algorithm);
+            action_watch(&conf, exe_dir);
         }
         _ => {
             println!("Unknown action: {}", action);
