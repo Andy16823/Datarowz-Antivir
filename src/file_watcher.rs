@@ -62,6 +62,9 @@ pub fn watch_dirs(paths: Vec<String>, hashset: &HashSet<String>, algorithm: Hash
                                                 result.malicious_files_list[0]
                                             );
                                         }
+                                        else {
+                                            println!("File {} is clean.", file_path);
+                                        }
                                     }
                                     None => {
                                         println!("File {} is locked or inaccessible.", file_path);

@@ -32,6 +32,17 @@ fn create_config(filename: &str) -> Ini {
     return conf;
 }
 
+fn load_watch_dirs(conf: &Ini) -> Vec<String> {
+    let dirs = conf
+        .section(Some("file_watcher"))
+        .and_then(|s| s.get("directories"))
+        .unwrap_or("");
+    dirs.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 // Load configuration from an INI file
 fn load_config(filename: &str) -> Option<Ini> {
     match Ini::load_from_file(filename) {
@@ -104,9 +115,54 @@ fn hash_of_file(filename: &str, algorithm: HashAlgorithm) -> Result<String, std:
     }
 }
 
+fn hash_of_file_chunked(filename : &str, algorithm: HashAlgorithm, chunk_size: usize) -> Result<String, std::io::Error> {
+    let mut file = File::open(filename)?;
+    let mut buffer = vec![0; chunk_size];
+    match algorithm {
+        HashAlgorithm::MD5 => {
+            let mut context = md5::Context::new();
+            loop {
+                let bytes_read = file.read(&mut buffer)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                context.consume(&buffer[..bytes_read]);
+            }
+            let digest = context.finalize();
+            Ok(format!("{:x}", digest))
+        }
+        HashAlgorithm::SHA1 => {
+            use sha1::{Digest, Sha1};
+            let mut hasher = Sha1::new();
+            loop {
+                let bytes_read = file.read(&mut buffer)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                hasher.update(&buffer[..bytes_read]);
+            }
+            let result = hasher.finalize();
+            Ok(format!("{:x}", result))
+        }
+        HashAlgorithm::SHA256 => {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            loop {
+                let bytes_read = file.read(&mut buffer)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                hasher.update(&buffer[..bytes_read]);
+            }
+            let result = hasher.finalize();
+            Ok(format!("{:x}", result))
+        }
+    }
+}
+
 // Scan a single file and check if its MD5 hash is in the hashset
 fn scan_file(filepath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm) -> ScanResult {
-    match hash_of_file(filepath, algorithm) {
+    match hash_of_file_chunked(filepath, algorithm, 8 * 1024 * 1024) {
         Ok(filehash) => {
             println!("File: {} Hash: {}", filepath, filehash);
             if hashset.contains(&filehash) {
@@ -203,12 +259,13 @@ fn action_scan(args: Vec<String>, conf: &Ini, exe_dir: &str) {
     }
 }
 
-fn action_create_menu(debug_mode: bool) {
+
+fn action_create_menu(_debug_mode: bool) {
     #[cfg(target_os = "windows")]
     {
         use crate::target_windows::register_context_menu;
 
-        if let Err(e) = register_context_menu(debug_mode) {
+        if let Err(e) = register_context_menu(_debug_mode) {
             println!("Could not register context menu: {}", e);
         }
     }
@@ -232,11 +289,12 @@ fn action_watch(conf: &Ini, exe_dir: &std::path::Path) {
     let data_file = Path::new(&hash_file);
     let hashset = create_hashset(&data_file.to_str().unwrap());
 
-    let watcher_dirs = conf.section("file_watcher").and_then(|s| s.get("watch_dirs"));
-
-    let mut paths = Vec::new();
-    paths.push("C:/Users/andy1/Documents".to_string());
-    file_watcher::watch_dirs(paths, &hashset, algorithm);
+    let dirs = load_watch_dirs(conf);
+    if dirs.is_empty() {
+        println!("No directories configured to watch. Please update the configuration.");
+        return;
+    }
+    file_watcher::watch_dirs(dirs, &hashset, algorithm);
 }
 
 fn main() {
