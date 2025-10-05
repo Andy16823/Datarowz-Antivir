@@ -27,7 +27,10 @@ fn create_config(filename: &str) -> Ini {
     conf.with_section(Some("settings"))
         .set("hash_algorithm", "sha256")
         .set("hash_file", "{executable_path}/data/full_sha256.txt")
-        .set("context_menu", "true");
+        .set("context_menu", "true")
+        .set("chunk_size_mb", "8");
+    conf.with_section(Some("file_watcher"))
+        .set("directories", "");
     conf.write_to_file(filename).unwrap();
     return conf;
 }
@@ -41,6 +44,16 @@ fn load_watch_dirs(conf: &Ini) -> Vec<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+fn load_chunk_size(conf: &Ini) -> usize {
+    let chunk_size_mb = conf
+        .section(Some("settings"))
+        .and_then(|s| s.get("chunk_size_mb"))
+        .unwrap_or("8")
+        .parse::<usize>()
+        .unwrap_or(8);
+    chunk_size_mb * 1024 * 1024 // Convert MB to bytes
 }
 
 // Load configuration from an INI file
@@ -89,6 +102,7 @@ fn create_hashset(filename: &str) -> HashSet<String> {
 }
 
 // Compute the hash of a file using the specified algorithm
+#[allow(dead_code)]
 fn hash_of_file(filename: &str, algorithm: HashAlgorithm) -> Result<String, std::io::Error> {
     let mut file = File::open(filename)?;
     let mut buffer = Vec::new();
@@ -115,6 +129,7 @@ fn hash_of_file(filename: &str, algorithm: HashAlgorithm) -> Result<String, std:
     }
 }
 
+// Compute the hash of a file in chunks to handle large files
 fn hash_of_file_chunked(filename : &str, algorithm: HashAlgorithm, chunk_size: usize) -> Result<String, std::io::Error> {
     let mut file = File::open(filename)?;
     let mut buffer = vec![0; chunk_size];
@@ -161,8 +176,9 @@ fn hash_of_file_chunked(filename : &str, algorithm: HashAlgorithm, chunk_size: u
 }
 
 // Scan a single file and check if its MD5 hash is in the hashset
-fn scan_file(filepath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm) -> ScanResult {
-    match hash_of_file_chunked(filepath, algorithm, 8 * 1024 * 1024) {
+fn scan_file(filepath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm, chunk_size: usize) -> ScanResult {
+
+    match hash_of_file_chunked(filepath, algorithm, chunk_size) {
         Ok(filehash) => {
             println!("File: {} Hash: {}", filepath, filehash);
             if hashset.contains(&filehash) {
@@ -184,7 +200,7 @@ fn scan_file(filepath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm
 }
 
 // Recursively scan a directory for files and check each file's MD5 hash
-fn scan_dir(dirpath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm) -> ScanResult {
+fn scan_dir(dirpath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm, chunk_size: usize) -> ScanResult {
     let mut total_files = 0;
     let mut malicious_files_list = Vec::new();
     let paths = std::fs::read_dir(dirpath).expect("Could not read directory");
@@ -192,12 +208,12 @@ fn scan_dir(dirpath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm) 
         let path = path.expect("Could not get path").path();
         if path.is_file() {
             let filepath = path.to_str().unwrap();
-            let result = scan_file(filepath, hashset, algorithm);
+            let result = scan_file(filepath, hashset, algorithm, chunk_size);
             total_files += result.total_files;
             malicious_files_list.extend(result.malicious_files_list);
         } else if path.is_dir() {
             let dirpath = path.to_str().unwrap();
-            let result = scan_dir(dirpath, hashset, algorithm);
+            let result = scan_dir(dirpath, hashset, algorithm, chunk_size);
             total_files += result.total_files;
             malicious_files_list.extend(result.malicious_files_list);
         }
@@ -234,12 +250,14 @@ fn action_scan(args: Vec<String>, conf: &Ini, exe_dir: &str) {
         panic!("Please provide a file path as an argument.");
     };
 
+    let chunk_size = load_chunk_size(&conf);
+
     let scan_start = std::time::Instant::now();
     println!("Scanning path: {}", filepath);
     let result = if Path::new(&filepath).is_dir() {
-        scan_dir(&filepath, &hashset, algorithm)
+        scan_dir(&filepath, &hashset, algorithm, chunk_size)
     } else {
-        scan_file(&filepath, &hashset, algorithm)
+        scan_file(&filepath, &hashset, algorithm, chunk_size)
     };
     let scan_duration = scan_start.elapsed();
     println!(
@@ -294,7 +312,8 @@ fn action_watch(conf: &Ini, exe_dir: &std::path::Path) {
         println!("No directories configured to watch. Please update the configuration.");
         return;
     }
-    file_watcher::watch_dirs(dirs, &hashset, algorithm);
+    let chunk_size = load_chunk_size(&conf);
+    file_watcher::watch_dirs(dirs, &hashset, algorithm, chunk_size);
 }
 
 fn main() {

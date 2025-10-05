@@ -15,12 +15,13 @@ pub fn try_file_scan(
     hashset: &HashSet<String>,
     algorithm: HashAlgorithm,
     max_attempts: u32,
+    chunk_size: usize
 ) -> Option<ScanResult> {
     let mut attempts = 0;
 
     while attempts < max_attempts {
         match check_file_access(filepath) {
-            FileAccessResult::Accessible => return Some(scan_file(filepath, hashset, algorithm)),
+            FileAccessResult::Accessible => return Some(scan_file(filepath, hashset, algorithm, chunk_size)),
             _ => {}
         }
         attempts += 1;
@@ -29,7 +30,7 @@ pub fn try_file_scan(
     None
 }
 
-pub fn watch_dirs(paths: Vec<String>, hashset: &HashSet<String>, algorithm: HashAlgorithm) {
+pub fn watch_dirs(paths: Vec<String>, hashset: &HashSet<String>, algorithm: HashAlgorithm, chunk_size: usize) {
 
     let (tx, rx) = channel();
     let mut watcher =
@@ -53,7 +54,7 @@ pub fn watch_dirs(paths: Vec<String>, hashset: &HashSet<String>, algorithm: Hash
                                 if !exist_file(&file_path) {
                                     continue;
                                 }
-                                let scan_result = try_file_scan(&file_path, hashset, algorithm, 5);
+                                let scan_result = try_file_scan(&file_path, hashset, algorithm, 5, chunk_size);
                                 match scan_result {
                                     Some(result) => {
                                         if result.malicious_found() {
