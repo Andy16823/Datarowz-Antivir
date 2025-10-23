@@ -12,6 +12,7 @@ use scan_result::ScanResult;
 mod file_watcher;
 mod io_utils;
 mod target_windows;
+mod target_unix;
 
 // Supported hash algorithms
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
