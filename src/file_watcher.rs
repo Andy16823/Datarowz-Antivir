@@ -2,6 +2,7 @@ use crate::io_utils::FileAccessResult;
 use crate::io_utils::check_file_access;
 use crate::io_utils::exist_file;
 use crate::{HashAlgorithm, scan_file, scan_result::ScanResult};
+use notify::event::RenameMode;
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -86,7 +87,11 @@ pub fn watch_dirs(paths: Vec<String>, hashset: &HashSet<String>, algorithm: Hash
                 if let Ok(ev) = event {
                     // Only scan on Create or Modify events
                     match &ev.kind {
-                        EventKind::Create(CreateKind::File) | EventKind::Modify(ModifyKind::Data(_)) => {
+                        EventKind::Create(CreateKind::File) |
+                        EventKind::Create(CreateKind::Any) |
+                        EventKind::Modify(ModifyKind::Data(_)) |
+                        EventKind::Modify(ModifyKind::Any) |
+                        EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
                             for path in ev.paths {
                                 let file_path = path.to_str().unwrap().to_string();
                                 debounce_list.insert(file_path.clone(), now);
