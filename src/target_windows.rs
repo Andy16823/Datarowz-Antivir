@@ -1,3 +1,4 @@
+
 #[cfg(target_os = "windows")]
 pub fn register_context_menu(debug_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
     use winreg::RegKey;

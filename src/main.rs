@@ -1,4 +1,3 @@
-use ini::Ini;
 use md5;
 use std::collections::HashSet;
 use std::fs::File;
@@ -9,10 +8,13 @@ use std::path::Path;
 mod scan_result;
 use scan_result::ScanResult;
 
+mod config;
 mod file_watcher;
 mod io_utils;
-mod target_windows;
 mod target_unix;
+mod target_windows;
+
+use config::Config;
 
 // Supported hash algorithms
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,56 +24,37 @@ enum HashAlgorithm {
     SHA256,
 }
 
-// Create a default configuration file
-fn create_config(filename: &str) -> Ini {
-    let mut conf = Ini::new();
-    conf.with_section(Some("settings"))
-        .set("hash_algorithm", "sha256")
-        .set("hash_file", "{executable_path}/data/full_sha256.txt")
-        .set("context_menu", "true")
-        .set("chunk_size_mb", "8");
-    conf.with_section(Some("file_watcher"))
-        .set("directories", "");
-    conf.write_to_file(filename).unwrap();
-    return conf;
+fn create_config_json(filename: &str) -> Config {
+    let config = Config::new();
+    let file = File::create(filename).expect("Could not create config file");
+    serde_json::to_writer_pretty(file, &config).expect("Could not write config to file");
+    config
 }
 
-fn load_watch_dirs(conf: &Ini) -> Vec<String> {
-    let dirs = conf
-        .section(Some("file_watcher"))
-        .and_then(|s| s.get("directories"))
-        .unwrap_or("");
-    dirs.split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
+fn load_watch_dirs(conf: &Config) -> Vec<String> {
+    let file_watcher = match &conf.file_watcher {
+        Some(fw) => fw,
+        None => return Vec::new(),
+    };
+    let dirs = &file_watcher.paths;
+    dirs.clone()
 }
 
-fn load_chunk_size(conf: &Ini) -> usize {
-    let chunk_size_mb = conf
-        .section(Some("settings"))
-        .and_then(|s| s.get("chunk_size_mb"))
-        .unwrap_or("8")
-        .parse::<usize>()
-        .unwrap_or(8);
+fn load_chunk_size(conf: &Config) -> usize {
+    let chunk_size_mb = conf.chunk_size_mb;
     chunk_size_mb * 1024 * 1024 // Convert MB to bytes
 }
 
-// Load configuration from an INI file
-fn load_config(filename: &str) -> Option<Ini> {
-    match Ini::load_from_file(filename) {
-        Ok(conf) => Some(conf),
-        Err(_) => None,
-    }
+fn load_config_json(filename: &str) -> Option<Config> {
+    let file = File::open(filename).ok()?;
+    let reader = BufReader::new(file);
+    let config: Config = serde_json::from_reader(reader).ok()?;
+    Some(config)
 }
 
 // Get the hash algorithm from the configuration
-fn load_algorithm(conf: &Ini) -> HashAlgorithm {
-    let algo_str = conf
-        .section(Some("settings"))
-        .and_then(|s| s.get("hash_algorithm"))
-        .unwrap_or("md5")
-        .to_lowercase();
+fn load_algorithm(conf: &Config) -> HashAlgorithm {
+    let algo_str = &conf.hash_algorithm.to_lowercase();
     match algo_str.as_str() {
         "md5" => HashAlgorithm::MD5,
         "sha1" => HashAlgorithm::SHA1,
@@ -84,11 +67,8 @@ fn load_algorithm(conf: &Ini) -> HashAlgorithm {
 }
 
 // Get the hash file path from the configuration, replacing placeholders
-fn load_hash_file(conf: &Ini, exe_dir: &str) -> String {
-    let hash_file_template = conf
-        .section(Some("settings"))
-        .and_then(|s| s.get("hash_file"))
-        .unwrap_or("{executable_path}/data/full_md5.txt");
+fn load_hash_file(conf: &Config, exe_dir: &str) -> String {
+    let hash_file_template = &conf.hash_file;
     hash_file_template.replace("{executable_path}", exe_dir)
 }
 
@@ -131,7 +111,11 @@ fn hash_of_file(filename: &str, algorithm: HashAlgorithm) -> Result<String, std:
 }
 
 // Compute the hash of a file in chunks to handle large files
-fn hash_of_file_chunked(filename : &str, algorithm: HashAlgorithm, chunk_size: usize) -> Result<String, std::io::Error> {
+fn hash_of_file_chunked(
+    filename: &str,
+    algorithm: HashAlgorithm,
+    chunk_size: usize,
+) -> Result<String, std::io::Error> {
     let mut file = File::open(filename)?;
     let mut buffer = vec![0; chunk_size];
     match algorithm {
@@ -177,8 +161,12 @@ fn hash_of_file_chunked(filename : &str, algorithm: HashAlgorithm, chunk_size: u
 }
 
 // Scan a single file and check if its MD5 hash is in the hashset
-fn scan_file(filepath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm, chunk_size: usize) -> ScanResult {
-
+fn scan_file(
+    filepath: &str,
+    hashset: &HashSet<String>,
+    algorithm: HashAlgorithm,
+    chunk_size: usize,
+) -> ScanResult {
     match hash_of_file_chunked(filepath, algorithm, chunk_size) {
         Ok(filehash) => {
             println!("File: {} Hash: {}", filepath, filehash);
@@ -201,7 +189,12 @@ fn scan_file(filepath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm
 }
 
 // Recursively scan a directory for files and check each file's MD5 hash
-fn scan_dir(dirpath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm, chunk_size: usize) -> ScanResult {
+fn scan_dir(
+    dirpath: &str,
+    hashset: &HashSet<String>,
+    algorithm: HashAlgorithm,
+    chunk_size: usize,
+) -> ScanResult {
     let mut total_files = 0;
     let mut malicious_files_list = Vec::new();
     let paths = std::fs::read_dir(dirpath).expect("Could not read directory");
@@ -225,19 +218,23 @@ fn scan_dir(dirpath: &str, hashset: &HashSet<String>, algorithm: HashAlgorithm, 
     }
 }
 
-fn action_scan(args: Vec<String>, conf: &Ini, exe_dir: &str) {
+fn action_scan(args: Vec<String>, conf: &Config, exe_dir: &str) {
+    // Load hash algorithm from config
     let algorithm = load_algorithm(&conf);
     println!("Using hash algorithm: {:?}", algorithm);
+
+    // Load hash file from config
     let hash_file = load_hash_file(&conf, exe_dir);
     let data_file = Path::new(&hash_file);
 
     if data_file.exists() == false {
         panic!(
-            "Hash file {} does not exist. Please check your configuration.",
+            "Hash file '{}' does not exist. Please check your configuration or download the hash database from https://bazaar.abuse.ch/export/",
             data_file.to_str().unwrap()
         );
     }
 
+    // Load the hashset from the hash file
     let hashset = create_hashset(&data_file.to_str().unwrap());
     println!(
         "Loaded {} hashes from {}",
@@ -245,14 +242,17 @@ fn action_scan(args: Vec<String>, conf: &Ini, exe_dir: &str) {
         data_file.to_str().unwrap()
     );
 
+    // Ensure a file path is provided
     let filepath = if args.len() > 2 {
         args[2].clone()
     } else {
         panic!("Please provide a file path as an argument.");
     };
 
+    // Load the max chunk size from config
     let chunk_size = load_chunk_size(&conf);
 
+    // Start scanning
     let scan_start = std::time::Instant::now();
     println!("Scanning path: {}", filepath);
     let result = if Path::new(&filepath).is_dir() {
@@ -278,7 +278,6 @@ fn action_scan(args: Vec<String>, conf: &Ini, exe_dir: &str) {
     }
 }
 
-
 fn action_create_menu(_debug_mode: bool) {
     #[cfg(target_os = "windows")]
     {
@@ -301,7 +300,7 @@ fn action_unregister_menu() {
     }
 }
 
-fn action_watch(conf: &Ini, exe_dir: &std::path::Path) {
+fn action_watch(conf: &Config, exe_dir: &std::path::Path) {
     let algorithm = load_algorithm(&conf);
     println!("Using hash algorithm: {:?}", algorithm);
     let hash_file = load_hash_file(&conf, exe_dir.to_str().unwrap());
@@ -330,24 +329,18 @@ fn main() {
     }
     let action = &args[1];
 
-    // Load or create configuration
-    let conf = load_config(exe_dir.join("cofig.ini").to_str().unwrap());
+    // New JSON based configuration
+    let conf = load_config_json(exe_dir.join("config.json").to_str().unwrap());
     let conf = match conf {
         Some(c) => c,
         None => {
-            println!("Configuration file not found. Creating default config.ini");
-            create_config(exe_dir.join("cofig.ini").to_str().unwrap())
+            println!("JSON Configuration file not found or invalid. Using default configuration.");
+            create_config_json(exe_dir.join("config.json").to_str().unwrap())
         }
     };
 
-    // Update context menus if its enabled
-    if conf
-        .section(Some("settings"))
-        .and_then(|s| s.get("context_menu"))
-        .unwrap_or("false")
-        .to_lowercase()
-        == "true"
-    {
+    // If context menu is enabled in config, register it
+    if conf.context_menu {
         action_create_menu(false);
     }
 
