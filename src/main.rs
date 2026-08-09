@@ -10,6 +10,7 @@ use scan_result::ScanResult;
 
 mod config;
 mod file_watcher;
+mod domain_watcher; 
 mod io_utils;
 mod target_unix;
 mod target_windows;
@@ -316,6 +317,21 @@ fn action_watch(conf: &Config, exe_dir: &std::path::Path) {
     file_watcher::watch_dirs(dirs, &hashset, algorithm, chunk_size);
 }
 
+fn action_watch_domains(conf: &Config) {
+    let domain_watcher = match &conf.domain_watcher {
+        Some(dw) => dw,
+        None => {
+            println!("Domain watcher is not configured. Please update the configuration.");
+            return;
+        }
+    };
+
+    let trusted_domains = domain_watcher.trusted_domains.clone();
+    let similarity_threshold = domain_watcher.similarity_threshold;
+    let listen_addr = domain_watcher.addr.parse().expect("Invalid listen address");
+    domain_watcher::watch_domains(trusted_domains, similarity_threshold, listen_addr);
+}
+
 fn main() {
     // Get the path of the executable and its directory
     let exe_path = std::env::current_exe().expect("Could not get current exe path");
@@ -349,6 +365,9 @@ fn main() {
         "scan" => action_scan(args, &conf, exe_dir.to_str().unwrap()),
         "register_context_menu" => action_create_menu(true),
         "unregister_context_menu" => action_unregister_menu(),
+        "watch_domains" => {
+            action_watch_domains(&conf);
+        }
         "watch" => {
             action_watch(&conf, exe_dir);
         }
